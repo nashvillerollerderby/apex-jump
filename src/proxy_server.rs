@@ -1,11 +1,9 @@
-use actix_web::dev::Service;
+#[cfg(feature = "static-files")]
 use actix_web::web::ServiceConfig;
-use actix_web::{App, Error, HttpRequest, HttpResponse, HttpServer, middleware, rt, web};
-use actix_ws::AggregatedMessage;
+use actix_web::{App, HttpServer, middleware, web};
 use crossbeam::channel;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use tokio_stream::StreamExt as _;
 
 pub fn init_logging() {
     match log4rs::init_file("log4rs.yaml", Default::default()) {
@@ -23,6 +21,7 @@ pub fn init_logging() {
 }
 
 pub struct WsProxyState {
+    #[allow(unused)]
     pub(crate) socket_state: Mutex<serde_json::Map<String, serde_json::Value>>,
     pub(crate) txs: Mutex<HashMap<uuid::Uuid, channel::Sender<String>>>,
 }
@@ -102,9 +101,9 @@ impl WsProxy {
                 .wrap(middleware::Logger::default())
                 .app_data(web::Data::clone(&shared_state))
                 .service(web::resource("/ws").route(web::get().to(crate::apex_ws::ws)))
-                .configure(|app| {
+                .configure(|_app| {
                     #[cfg(feature = "static-files")]
-                    configure_static_dirs(app, &static_dirs)
+                    configure_static_dirs(_app, &static_dirs)
                 })
         })
         .workers(4)

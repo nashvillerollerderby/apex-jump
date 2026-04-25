@@ -5,8 +5,8 @@ name: Publish to crates.io
 # Controls when the workflow will run
 on:
   # Triggers the workflow on push events for all tags
-  push:
-    tags: [ "*" ]
+  pull_request:
+    branches: [ "*" ]
 
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
@@ -14,23 +14,20 @@ on:
 # A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
   # This workflow contains a single job called "build"
-  publish:
+  build:
     # The type of runner that the job will run on
     runs-on: ubuntu-latest
-
-    environment:
-      name: crates.io
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - uses: actions/checkout@v5
         with:
-          fetch-tags: true
           ref: ${{ github.event.ref }}
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
           override: true
-      - uses: katyo/publish-crates@v2
-        with:
-          registry-token: ${{ secrets.NRD_CRATES_TOKEN }}
+      - name: default build
+        run: cargo build
+      - name: static-files build
+        run: cargo build --features static-files

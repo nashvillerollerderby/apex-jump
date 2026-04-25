@@ -2,7 +2,6 @@ pub(crate) mod apex_ws;
 pub(crate) mod crg_ws;
 mod proxy_server;
 
-pub(crate) use apex_ws::*;
 use clap::Parser;
 use proxy_server::*;
 
@@ -28,6 +27,9 @@ async fn main() -> std::io::Result<()> {
 
     init_logging();
 
+    #[cfg(not(feature = "static-files"))]
+    let proxy = WsProxy::builder().crg(&args.crg_host, args.crg_port);
+    #[cfg(feature = "static-files")]
     let mut proxy = WsProxy::builder().crg(&args.crg_host, args.crg_port);
 
     #[cfg(feature = "static-files")]
