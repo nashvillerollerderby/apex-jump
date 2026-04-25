@@ -4,6 +4,15 @@ version = "0.0.2"
 edition = "2024"
 description = "A WebSocket proxy for the CRG Scoreboard. Functions as both a library and a binary."
 license = "GPL-3"
+keywords = ["derby", "crg", "scoreboard", "websockets", "proxy"]
+authors = [
+    "Charlie Humphreys <charlie.mel.humphreys@gmail.com",
+]
+repository = "https://github.com/nashvillerollerderby/apex-jump"
+homepage = "https://github.com/nashvillerollerderby/apex-jump"
+
+[package.metadata.docs.rs]
+all-features = true
 
 [lib]
 path = "src/lib.rs"
