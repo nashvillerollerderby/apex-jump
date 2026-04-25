@@ -1,11 +1,8 @@
 use crate::WsProxyState;
-use actix_web::{Error, HttpRequest, HttpResponse, HttpServer, Responder, rt, web};
-use actix_ws::AggregatedMessage;
+use actix_web::{HttpRequest, Responder, rt, web};
 use actix_ws::Message;
 use crossbeam::channel;
-use futures_util::{StreamExt as _, TryStreamExt};
-use tokio::task::spawn_local;
-use tokio_util::io::StreamReader;
+use futures_util::TryStreamExt;
 
 pub async fn ws(
     req: HttpRequest,

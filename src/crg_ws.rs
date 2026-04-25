@@ -1,6 +1,5 @@
 use crate::WsProxyState;
-use actix_web::rt;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread::JoinHandle;
 use tungstenite::client::IntoClientRequest;
 use tungstenite::{Message, connect};
