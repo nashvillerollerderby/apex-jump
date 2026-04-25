@@ -18,7 +18,7 @@ all-features = true
 path = "src/lib.rs"
 
 [[bin]]
-name = "proxy"
+name = "apex-jump"
 path = "src/proxy.rs"
 
 [features]
