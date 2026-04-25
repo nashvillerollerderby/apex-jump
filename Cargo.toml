@@ -1,6 +1,6 @@
 [package]
 name = "apex-jump"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2024"
 description = "A WebSocket proxy for the CRG Scoreboard. Functions as both a library and a binary."
 license = "GPL-3"
