@@ -5,7 +5,7 @@ name: Publish to crates.io
 # Controls when the workflow will run
 on:
   # Triggers the workflow on push events for all tags
-  push:
+  pull_request:
     branches: [ "*" ]
 
   # Allows you to run this workflow manually from the Actions tab
