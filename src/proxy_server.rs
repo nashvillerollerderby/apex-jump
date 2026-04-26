@@ -42,9 +42,10 @@ pub struct WsProxy {
     state: Arc<WsProxyState>,
     ip: Option<String>,
     port: Option<u16>,
+    worker_count: Option<usize>,
+    crg: (String, u16),
     #[cfg(feature = "static-files")]
     static_dirs: HashMap<String, (String, Option<String>)>,
-    crg: (String, u16),
 }
 
 #[cfg(feature = "static-files")]
@@ -106,7 +107,7 @@ impl WsProxy {
                     configure_static_dirs(_app, &static_dirs)
                 })
         })
-        .workers(4)
+        .workers(self.worker_count.unwrap_or(4))
         .bind((ip, port))?
         .run()
         .await
@@ -117,6 +118,8 @@ impl WsProxy {
 pub struct WsProxyBuilder {
     crg_host: Option<String>,
     crg_port: Option<u16>,
+    port: Option<u16>,
+    worker_count: Option<usize>,
     #[cfg(feature = "static-files")]
     static_dirs: HashMap<String, (String, Option<String>)>,
 }
@@ -132,7 +135,8 @@ impl WsProxyBuilder {
         WsProxy {
             state: Arc::new(WsProxyState::new()),
             ip: None,
-            port: None,
+            port: self.port,
+            worker_count: self.worker_count,
             #[cfg(feature = "static-files")]
             static_dirs: self.static_dirs,
             crg: (crg_host, crg_port),
@@ -142,6 +146,16 @@ impl WsProxyBuilder {
     pub fn crg(mut self, host: &str, port: u16) -> Self {
         self.crg_host = Some(host.into());
         self.crg_port = Some(port);
+        self
+    }
+
+    pub fn port(mut self, port: u16) -> Self {
+        self.port = Some(port);
+        self
+    }
+
+    pub fn worker_count(mut self, workers: usize) -> Self {
+        self.worker_count = Some(workers);
         self
     }
 
