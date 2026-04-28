@@ -1,6 +1,6 @@
 [package]
 name = "apex-jump"
-version = "0.0.2"
+version = "0.1.0"
 edition = "2024"
 description = "A WebSocket proxy for the CRG Scoreboard. Functions as both a library and a binary."
 license-file = "LICENSE"
@@ -22,15 +22,15 @@ name = "apex-jump"
 path = "src/proxy.rs"
 
 [features]
-write-enabled = []
-static-files = ["actix-files"]
+static-files = []
 
 [dependencies]
-actix-files = { version = "0.6.10", optional = true }
-actix-web = "4.13.0"
-actix-ws = "0.4.0"
+axum = { version = "0.8.9", features = ["macros", "ws"] }
+axum-extra = { version = "0.12.6", features = ["typed-header"] }
 clap = { version = "4.6.1", features = ["derive"] }
 crossbeam = { version = "0.8.4", features = ["crossbeam-channel"] }
+futures-util = "0.3.32"
+headers = "0.4.1"
 log = "0.4.29"
 log4rs = { version = "1.4.0", features = ["serde"] }
 serde_json = "1.0.149"
@@ -38,7 +38,7 @@ serde_yaml_ng = "0.10.0"
 tokio-stream = "0.1.18"
 tungstenite = "0.29.0"
 uuid = { version = "1.23.1", features = ["v4"] }
-futures-util = "0.3.32"
+tokio = { version = "1.52.1", features = ["full"] }
 tokio-tungstenite = "0.29.0"
-tokio-util = "0.7.18"
-tokio = "1.52.1"
+tower = "0.5.3"
+tower-http = { version = "0.6.8", features = ["full"] }

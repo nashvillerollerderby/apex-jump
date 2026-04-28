@@ -17,49 +17,38 @@ struct Args {
     #[arg(long, default_value_t = 8000)]
     crg_port: u16,
 
+    /// The number of seconds to wait between attempts to reconnect to the CRG Scoreboard WebSocket
+    #[arg(short = 'r', long = "reconnect-delay-s", default_value_t = 5)]
+    crg_ws_reconnect_s: u64,
+
     /// The port on which the apex-jump server should be started
     #[arg(short, long, default_value_t = 8001)]
     port: u16,
 
-    /// The number of workers with which the apex-jump server should launch
-    #[arg(short, long)]
-    worker_count: Option<usize>,
-
+    /// File mount formatted as "<path_to_files>"
     #[cfg(feature = "static-files")]
-    #[arg(long)]
-    /// File mounts formatted as "<server_path>;<absolute_os_path_to_files>[;<index_file>]"
-    files: Vec<String>,
+    #[arg(short, long)]
+    files: Option<String>,
 }
 
-#[actix_web::main]
+#[tokio::main]
 async fn main() -> std::io::Result<()> {
     let args = Args::parse();
 
     init_logging();
 
+    #[allow(unused_mut)]
     let mut proxy = WsProxy::builder();
 
     #[cfg(feature = "static-files")]
-    for static_files in args.files {
-        let s = static_files.split(';').collect::<Vec<&str>>();
-        match s.len() {
-            3 => {
-                proxy = proxy.with_static(s[0], s[1], Some(s[2]));
-            }
-            2 => {
-                proxy = proxy.with_static(s[0], s[1], None);
-            }
-            _ => {
-                log::error!("Files argument should be 2 or 3 segments, separated by a semicolon.");
-                std::process::exit(1);
-            }
-        }
+    if let Some(files) = args.files {
+        proxy = proxy.with_static(files);
     }
 
-    proxy = proxy.crg(&args.crg_host, args.crg_port).port(args.port);
-    if let Some(worker_count) = args.worker_count {
-        proxy = proxy.worker_count(worker_count);
-    }
-
-    proxy.build().start().await
+    proxy
+        .crg(&args.crg_host, args.crg_port)
+        .port(args.port)
+        .build()
+        .start()
+        .await
 }
