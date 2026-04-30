@@ -27,4 +27,4 @@ jobs:
         with:
           platforms: linux/amd64,linux/arm64,linux/x86_64
           push: true
-          tags: nashvillerollerderby/apex-jump:latest,nashvillerollerderby/apex-jump:${{ github.ref }}
+          tags: nashvillerollerderby/apex-jump:latest,nashvillerollerderby/apex-jump:${{ github.ref_name }}
