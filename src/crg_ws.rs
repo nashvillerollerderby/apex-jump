@@ -31,6 +31,13 @@ pub(crate) async fn init(crg: (String, u16), state: Arc<WsProxyState>) -> JoinHa
         .unwrap();
     let handle = tokio::spawn(async move {
         'socket: loop {
+            {
+                let lock = state.stop.lock().await;
+                if *lock {
+                    log::info!("Received signal to stop CRG WebSocket, stopping");
+                    break 'socket;
+                }
+            }
             let state = state.clone();
             log::info!("Connecting to CRG Scoreboard WS");
             let (mut stream, _response) = match connect_async(request.clone()).await {

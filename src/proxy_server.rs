@@ -110,6 +110,7 @@ pub(crate) struct WsProxyState {
     pub(crate) socket_state: Arc<Mutex<Value>>,
     pub(crate) txs: Arc<Mutex<HashMap<uuid::Uuid, channel::Sender<String>>>>,
     pub(crate) crg_ws_reconnect_rate_s: u64,
+    pub(crate) stop: Arc<Mutex<bool>>,
 }
 
 unsafe impl Send for WsProxyState {}
@@ -120,6 +121,7 @@ impl WsProxyState {
         WsProxyState {
             socket_state: Default::default(),
             txs: Default::default(),
+            stop: Arc::new(Mutex::new(false)),
             crg_ws_reconnect_rate_s,
         }
     }
@@ -135,6 +137,24 @@ pub struct WsProxy {
 }
 
 const LOG4RS_DEFAULT_CONFIG: &str = include_str!("../log4rs.yaml");
+
+async fn shutdown(state: Arc<WsProxyState>) {
+    let ctrl_c = tokio::signal::ctrl_c();
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("failed to install signal handler");
+    let mut terminate = Box::pin(terminate.recv());
+
+    tokio::select! {
+        _ = ctrl_c => {
+            let mut stop = state.stop.lock().await;
+            *stop = true;
+        },
+        _ = &mut terminate => {
+            let mut stop = state.stop.lock().await;
+            *stop = true;
+        },
+    }
+}
 
 impl WsProxy {
     pub fn builder() -> WsProxyBuilder {
@@ -156,7 +176,7 @@ impl WsProxy {
         let mut app = Router::new()
             .route("/WS/", any(crate::apex_ws::ws_handler))
             .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()))
-            .with_state(shared_state);
+            .with_state(shared_state.clone());
 
         #[cfg(feature = "static-files")]
         if let Some(ref dir) = self.static_dir {
@@ -171,6 +191,7 @@ impl WsProxy {
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),
         )
+        .with_graceful_shutdown(shutdown(shared_state))
         .await
     }
 }

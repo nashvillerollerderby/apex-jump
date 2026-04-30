@@ -21,6 +21,11 @@ path = "src/lib.rs"
 name = "apex-jump"
 path = "src/proxy.rs"
 
+[[bin]]
+name = "apex-jump-fileserver"
+path = "src/proxy.rs"
+required-features = ["static-files"]
+
 [features]
 static-files = []
 

@@ -37,6 +37,11 @@ async fn main() -> std::io::Result<()> {
 
     init_logging();
 
+    #[cfg(not(feature = "static-files"))]
+    log::info!("Running apex-jump");
+    #[cfg(feature = "static-files")]
+    log::info!("Running apex-jump with integrated fileserver");
+
     #[allow(unused_mut)]
     let mut proxy = WsProxy::builder();
 
