@@ -10,6 +10,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry cargo build --features s
 
 FROM rust:1.95-slim
 
+USER 1001
+
 WORKDIR /files
 WORKDIR /
 COPY --from=build /apex-jump/target/release/apex-jump .
