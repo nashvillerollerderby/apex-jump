@@ -1,0 +1,11 @@
+crg_host: localhost
+crg_port: 8000
+crg_ws_reconnect_s: 5
+
+port: 8001
+
+registration_paths:
+  - "ScoreBoard.Game(*)"
+  - "ScoreBoard.CurrentGame"
+  - "ScoreBoard.Settings"
+  - "ScoreBoard.Version"

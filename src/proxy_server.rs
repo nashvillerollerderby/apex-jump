@@ -1,14 +1,14 @@
 use axum::Router;
-use axum::routing::any;
+use axum::routing::{MethodRouter, any};
 use crossbeam::channel;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::collections::HashMap;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 
+use crate::args::Args;
 #[cfg(feature = "static-files")]
 use axum::http::header::CONTENT_TYPE;
 #[cfg(feature = "static-files")]
@@ -17,6 +17,7 @@ use axum::http::{Response, StatusCode};
 use axum::routing::get;
 #[cfg(feature = "static-files")]
 use std::fs;
+use std::net::SocketAddr;
 #[cfg(feature = "static-files")]
 use std::path::{Path, PathBuf};
 #[cfg(feature = "static-files")]
@@ -105,24 +106,29 @@ fn handle_directories_with_router(dir: &String) -> Router {
     router
 }
 
-pub(crate) struct WsProxyState {
+#[derive(Clone)]
+pub struct WsProxyState {
     #[allow(unused)]
-    pub(crate) socket_state: Arc<Mutex<Value>>,
+    pub socket_state: Arc<Mutex<Value>>,
     pub(crate) txs: Arc<Mutex<HashMap<uuid::Uuid, channel::Sender<String>>>>,
     pub(crate) crg_ws_reconnect_rate_s: u64,
     pub(crate) stop: Arc<Mutex<bool>>,
+    pub(crate) registration_paths: Option<Vec<String>>,
+    pub ext: Arc<Mutex<Map<String, Value>>>,
 }
 
 unsafe impl Send for WsProxyState {}
 unsafe impl Sync for WsProxyState {}
 
 impl WsProxyState {
-    fn new(crg_ws_reconnect_rate_s: u64) -> Self {
+    fn new(crg_ws_reconnect_rate_s: u64, registration_paths: Option<Vec<String>>) -> Self {
         WsProxyState {
             socket_state: Default::default(),
             txs: Default::default(),
             stop: Arc::new(Mutex::new(false)),
+            registration_paths,
             crg_ws_reconnect_rate_s,
+            ext: Default::default(),
         }
     }
 }
@@ -134,6 +140,8 @@ pub struct WsProxy {
     crg: (String, u16),
     #[cfg(feature = "static-files")]
     static_dir: Option<String>,
+    services: HashMap<String, Router<Arc<WsProxyState>>>,
+    routes: HashMap<String, MethodRouter<Arc<WsProxyState>>>,
 }
 
 const LOG4RS_DEFAULT_CONFIG: &str = include_str!("../log4rs.yaml");
@@ -174,9 +182,16 @@ impl WsProxy {
 
         #[allow(unused_mut)]
         let mut app = Router::new()
-            .route("/WS/", any(crate::apex_ws::ws_handler))
             .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()))
-            .with_state(shared_state.clone());
+            .route("/WS/", any(crate::apex_ws::ws_handler));
+
+        for (path, service) in self.services.clone() {
+            app = app.nest(&path, service);
+        }
+
+        for (path, route) in &self.routes {
+            app = app.route(path, route.clone());
+        }
 
         #[cfg(feature = "static-files")]
         if let Some(ref dir) = self.static_dir {
@@ -184,6 +199,8 @@ impl WsProxy {
             let router = handle_directories_with_router(dir).fallback_service(file_service);
             app = app.fallback_service(router);
         }
+
+        let app = app.with_state(shared_state.clone());
 
         log::info!("Starting server on {}:{}", ip, port);
         let listener = tokio::net::TcpListener::bind(format!("{}:{}", ip, port)).await?;
@@ -204,6 +221,9 @@ pub struct WsProxyBuilder {
     port: Option<u16>,
     #[cfg(feature = "static-files")]
     static_dir: Option<String>,
+    registration_paths: Option<Vec<String>>,
+    services: HashMap<String, Router<Arc<WsProxyState>>>,
+    routes: HashMap<String, MethodRouter<Arc<WsProxyState>>>,
 }
 
 impl WsProxyBuilder {
@@ -215,16 +235,21 @@ impl WsProxyBuilder {
             .crg_port
             .expect("Unable to start server without CRG host port");
         WsProxy {
-            state: Arc::new(WsProxyState::new(self.crg_ws_reconnect_rate_s)),
+            state: Arc::new(WsProxyState::new(
+                self.crg_ws_reconnect_rate_s,
+                self.registration_paths,
+            )),
             ip: None,
             port: self.port,
             #[cfg(feature = "static-files")]
             static_dir: self.static_dir,
             crg: (crg_host, crg_port),
+            services: self.services,
+            routes: self.routes,
         }
     }
 
-    pub fn crg(mut self, host: &str, port: u16) -> Self {
+    pub fn for_crg(mut self, host: &str, port: u16) -> Self {
         self.crg_host = Some(host.into());
         self.crg_port = Some(port);
         self
@@ -235,9 +260,39 @@ impl WsProxyBuilder {
         self
     }
 
+    pub fn with_registration_paths(mut self, registration_paths: Vec<String>) -> Self {
+        if registration_paths.len() > 0 {
+            self.registration_paths = Some(registration_paths);
+        }
+        self
+    }
+
     #[cfg(feature = "static-files")]
     pub fn with_static(mut self, dir: String) -> Self {
         self.static_dir = Some(dir);
+        self
+    }
+
+    pub fn with_config(mut self, config: Args) -> Self {
+        self.crg_port = Some(config.crg_port);
+        self.crg_host = Some(config.crg_host);
+        self.port = Some(config.port);
+        self.crg_ws_reconnect_rate_s = config.crg_ws_reconnect_s;
+        self.registration_paths = if config.registration_paths.len() > 0 {
+            Some(config.registration_paths)
+        } else {
+            None
+        };
+        self
+    }
+
+    pub fn with_route(mut self, path: &str, route: MethodRouter<Arc<WsProxyState>>) -> Self {
+        self.routes.insert(path.to_string(), route);
+        self
+    }
+
+    pub fn with_service(mut self, path: &str, service: Router<Arc<WsProxyState>>) -> Self {
+        self.services.insert(path.to_string(), service);
         self
     }
 }

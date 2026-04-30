@@ -52,35 +52,52 @@ pub(crate) async fn init(crg: (String, u16), state: Arc<WsProxyState>) -> JoinHa
                     continue 'socket;
                 }
             };
+            let registration_paths = match &state.registration_paths {
+                Some(paths) => Value::Array(
+                    paths
+                        .into_iter()
+                        .map(|v| Value::String(v.clone()))
+                        .collect(),
+                ),
+                None => {
+                    log::warn!(
+                        "No registration paths provided; using defaults: Game(*), CurrentGame, Settings, Version"
+                    );
+                    json!([
+                        "ScoreBoard.Game(*)",
+                        "ScoreBoard.CurrentGame",
+                        "ScoreBoard.Settings",
+                        "ScoreBoard.Version",
+                    ])
+                }
+            };
             log::info!("CRG Scoreboard WS Connected");
             let json = json!({
                 "action": "Register",
-                "paths": [
-                    "ScoreBoard.Game(*)",
-                    "ScoreBoard.CurrentGame",
-                    "ScoreBoard.Settings",
-                    "ScoreBoard.Version",
-                ]
+                "paths": registration_paths
             });
 
             stream.send(Message::text(json.to_string())).await.unwrap();
-            log::info!("Registered for updates");
+            log::info!("Registered for updates with {:?}", json);
 
             log::info!("Looping for CRG Scoreboard WS");
             'main: loop {
                 match timeout(Duration::from_secs(10), StreamExt::try_next(&mut stream)).await {
                     Ok(Ok(Some(message))) => match message {
                         msg @ Message::Text(_) => {
-                            log::info!("Message received from CRG: {}", msg);
+                            let mut map = serde_json::from_str::<Value>(&msg.to_string()).unwrap();
+                            if let Some(obj) = map.as_object() {
+                                map = obj.get("state").unwrap_or(&map).clone();
+                            }
+                            log::debug!("Message received from CRG: {}", msg);
                             {
                                 let mut lock = state.socket_state.lock().await;
-                                let map = serde_json::from_str::<Value>(&msg.to_string()).unwrap();
-                                deep_merge(&mut *lock, map);
+                                deep_merge(&mut *lock, map.clone());
                             }
 
                             let lock = state.txs.lock().await;
                             lock.iter().for_each(|(_, tx)| {
-                                match tx.send(msg.clone().into_text().unwrap().parse().unwrap()) {
+                                match tx.send(serde_json::to_string(&map).unwrap()) {
                                     Ok(_) => {}
                                     Err(e) => {
                                         log::error!("{}", e);
