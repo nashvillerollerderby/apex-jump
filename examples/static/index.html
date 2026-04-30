@@ -1,14 +1,20 @@
+<!DOCTYPE html>
 <head>
-
     <title>apex-jump static files example</title>
 
     <script>
-        const ws = new WebSocket('/ws');
-        ws.onmessage = (_it, message) => {
-            console.log(message);
+        let state = {};
+        const ws = new WebSocket('/WS/');
+        ws.onmessage = (message) => {
+            const content = JSON.parse(message.data);
+            state = {
+                ...state,
+                ...content,
+            };
+            document.getElementById("state").innerText = JSON.stringify(state, null, 2);
         }
     </script>
 </head>
 <body>
-
+<pre><code id="state"></code></pre>
 </body>

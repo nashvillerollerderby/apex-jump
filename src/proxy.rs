@@ -1,35 +1,13 @@
 pub(crate) mod apex_ws;
+mod args;
 pub(crate) mod crg_ws;
 mod proxy_server;
 
+use crate::args::Args;
 use clap::Parser;
 use proxy_server::*;
-
-/// Runs a WebSocket server that proxies the WebSocket data from the CRG Scoreboard to additional clients.
-#[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
-struct Args {
-    /// The host server for the CRG Scoreboard instance
-    #[arg(long, default_value = "localhost")]
-    crg_host: String,
-
-    /// The host port for the CRG Scoreboard instance
-    #[arg(long, default_value_t = 8000)]
-    crg_port: u16,
-
-    /// The number of seconds to wait between attempts to reconnect to the CRG Scoreboard WebSocket
-    #[arg(short = 'r', long = "reconnect-delay-s", default_value_t = 5)]
-    crg_ws_reconnect_s: u64,
-
-    /// The port on which the apex-jump server should be started
-    #[arg(short, long, default_value_t = 8001)]
-    port: u16,
-
-    /// File mount formatted as "<path_to_files>"
-    #[cfg(feature = "static-files")]
-    #[arg(short, long)]
-    files: Option<String>,
-}
+use std::path::PathBuf;
+use std::str::FromStr;
 
 #[tokio::main]
 async fn main() -> std::io::Result<()> {
@@ -45,15 +23,22 @@ async fn main() -> std::io::Result<()> {
     #[allow(unused_mut)]
     let mut proxy = WsProxy::builder();
 
-    #[cfg(feature = "static-files")]
-    if let Some(files) = args.files {
-        proxy = proxy.with_static(files);
+    if let Some(config_file_path) = args.config_file {
+        let path = PathBuf::from_str(&config_file_path).unwrap();
+        let file_content = std::fs::read_to_string(path)?;
+
+        let args = serde_yaml_ng::from_str::<Args>(&file_content).unwrap();
+        proxy = proxy.with_config(args);
+    } else {
+        #[cfg(feature = "static-files")]
+        if let Some(files) = args.files {
+            proxy = proxy.with_static(files);
+        }
+        proxy = proxy
+            .for_crg(&args.crg_host, args.crg_port)
+            .port(args.port)
+            .with_registration_paths(args.registration_paths);
     }
 
-    proxy
-        .crg(&args.crg_host, args.crg_port)
-        .port(args.port)
-        .build()
-        .start()
-        .await
+    proxy.build().start().await
 }

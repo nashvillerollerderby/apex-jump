@@ -60,6 +60,8 @@ async fn handle_socket(mut socket: WebSocket, who: SocketAddr, shared_state: Arc
             ))
             .await
             .expect("Unable to send new subscriber message");
+        log::info!("New subscriber message: {}", socket_state);
+        log::info!("New subscriber message sent to client {}", uuid);
     }
 
     // By splitting socket we can send and receive at the same time. In this example we will send
