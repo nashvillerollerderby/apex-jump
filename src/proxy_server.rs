@@ -3,29 +3,33 @@ use axum::routing::{MethodRouter, any};
 use crossbeam::channel;
 use serde_json::{Map, Value};
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
+use uuid::Uuid;
 
 use crate::args::Args;
-#[cfg(feature = "static-files")]
-use axum::http::header::CONTENT_TYPE;
-#[cfg(feature = "static-files")]
-use axum::http::{Response, StatusCode};
-#[cfg(feature = "static-files")]
-use axum::routing::get;
-#[cfg(feature = "static-files")]
-use std::fs;
-use std::net::SocketAddr;
-#[cfg(feature = "static-files")]
-use std::path::{Path, PathBuf};
-#[cfg(feature = "static-files")]
-use tower_http::services::ServeDir;
 
+cfg_if::cfg_if! {
+    if #[cfg(feature = "static-files")] {
+        use axum::http::header::CONTENT_TYPE;
+        use axum::http::{Response, StatusCode};
+        use axum::routing::get;
+        use std::fs;
+        use std::path::{Path, PathBuf};
+        use tower_http::services::ServeDir;
+    }
+}
+
+/// Initializes logging from `./log4rs.yaml`, or from the default `log4rs.yaml` in the
+/// [`apex-jump` repository](https://github.com/nashvillerollerderby/apex-jump/blob/main/log4rs.yaml).
 pub fn init_logging() {
     match log4rs::init_file("log4rs.yaml", Default::default()) {
-        Ok(_) => {}
+        Ok(_) => {
+            log::info!("Logging has been initialized.");
+        }
         Err(_) => {
             let config =
                 serde_yaml_ng::from_str::<log4rs::config::RawConfig>(LOG4RS_DEFAULT_CONFIG)
@@ -106,14 +110,18 @@ fn handle_directories_with_router(dir: &String) -> Router {
     router
 }
 
+/// The proxy's state object, storing Arc'd Mutexes of mutable values.
 #[derive(Clone)]
 pub struct WsProxyState {
+    /// The full state of all WebSocket messages received from the CRG Scoreboard.
     #[allow(unused)]
     pub socket_state: Arc<Mutex<Value>>,
-    pub(crate) txs: Arc<Mutex<HashMap<uuid::Uuid, channel::Sender<String>>>>,
+    pub(crate) txs: Arc<Mutex<HashMap<Uuid, channel::Sender<String>>>>,
     pub(crate) crg_ws_reconnect_rate_s: u64,
     pub(crate) stop: Arc<Mutex<bool>>,
     pub(crate) registration_paths: Option<Vec<String>>,
+    /// An empty Map to be used by anything external to `apex-jump`.
+    #[allow(unused)]
     pub ext: Arc<Mutex<Map<String, Value>>>,
 }
 
@@ -165,6 +173,8 @@ async fn shutdown(state: Arc<WsProxyState>) {
 }
 
 impl WsProxy {
+    /// Creates an instance of the WsProxyBuilder, which allows one to use the builder pattern to
+    /// configure a WsProxy instance.
     pub fn builder() -> WsProxyBuilder {
         WsProxyBuilder {
             crg_ws_reconnect_rate_s: 5,
@@ -172,6 +182,23 @@ impl WsProxy {
         }
     }
 
+    /// Start the `apex-jump` WebSocket proxy server.
+    ///
+    /// **This will block the thread on which it is run until the server is stopped.**
+    ///
+    /// # Example
+    /// ```rust
+    /// use apex_jump::WsProxy;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     WsProxy::builder()
+    ///         // configure your WsProxy here
+    ///         .build()
+    ///         .start()
+    ///         .await
+    /// }
+    /// ```
     pub async fn start(&self) -> std::io::Result<()> {
         let ip = self.ip.clone().unwrap_or("127.0.0.1".to_string());
         let port = self.port.clone().unwrap_or(8001);
@@ -185,19 +212,19 @@ impl WsProxy {
             .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()))
             .route("/WS/", any(crate::apex_ws::ws_handler));
 
+        #[cfg(feature = "static-files")]
+        if let Some(ref dir) = self.static_dir {
+            let file_service = ServeDir::new(dir.clone());
+            let router = handle_directories_with_router(dir).fallback_service(file_service);
+            app = app.fallback_service(router);
+        }
+
         for (path, service) in self.services.clone() {
             app = app.nest(&path, service);
         }
 
         for (path, route) in &self.routes {
             app = app.route(path, route.clone());
-        }
-
-        #[cfg(feature = "static-files")]
-        if let Some(ref dir) = self.static_dir {
-            let file_service = ServeDir::new(dir.clone());
-            let router = handle_directories_with_router(dir).fallback_service(file_service);
-            app = app.fallback_service(router);
         }
 
         let app = app.with_state(shared_state.clone());
@@ -211,8 +238,56 @@ impl WsProxy {
         .with_graceful_shutdown(shutdown(shared_state))
         .await
     }
+
+    /// Open a new subscriber to the internal CRG WebSocket state in Rust.
+    ///
+    /// Returns a tuple containing the UUID of the subscriber and the receiver channel.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// let (uuid, subscriber) = proxy.new_subscriber().await;
+    /// while let Some(Ok(msg)) = receiver.next().await {
+    ///     log::info!(
+    ///         r#"Message received: "{}""#,
+    ///.        msg.to_text().unwrap()
+    ///     );
+    /// }
+    /// proxy.close_subscriber(uuid).await;
+    /// ```
+    #[allow(unused)]
+    pub async fn new_subscriber(&self) -> (Uuid, channel::Receiver<String>) {
+        let (tx, rx) = channel::unbounded::<String>();
+        let uuid = Uuid::new_v4();
+        {
+            let socket_state = self.state.socket_state.lock().await;
+            tx.send(serde_json::to_string(&*socket_state).unwrap())
+                .unwrap();
+        }
+        {
+            let mut txs = self.state.txs.lock().await;
+            txs.insert(uuid, tx);
+        }
+        (uuid, rx)
+    }
+
+    /// Closes a Rust-based subscriber to the internal CRG WebSocket state.
+    #[allow(unused)]
+    pub async fn close_subscriber(&self, uuid: Uuid) {
+        let mut txs = self.state.txs.lock().await;
+        txs.remove(&uuid);
+    }
 }
 
+/// A structure that allows one to use the builder pattern to configure an instance of the WsProxy.
+///
+/// # Example
+/// ```rust
+/// let proxy = WsProxy::builder()
+///     .for_crg("localhost", 8000)
+///     .build();
+/// proxy.start().await;
+/// ```
 #[derive(Default)]
 pub struct WsProxyBuilder {
     crg_host: Option<String>,
@@ -227,6 +302,8 @@ pub struct WsProxyBuilder {
 }
 
 impl WsProxyBuilder {
+    /// From the currently configured state of the WsProxyBuilder, instantiate a WsProxy with the
+    /// same configuration.
     pub fn build(self) -> WsProxy {
         let crg_host = self
             .crg_host
@@ -249,17 +326,31 @@ impl WsProxyBuilder {
         }
     }
 
+    /// Set the host address and port on which the CRG Scoreboard is running.
     pub fn for_crg(mut self, host: &str, port: u16) -> Self {
         self.crg_host = Some(host.into());
         self.crg_port = Some(port);
         self
     }
 
+    /// Set the port to which the WsProxy should bind.
     pub fn port(mut self, port: u16) -> Self {
         self.port = Some(port);
         self
     }
 
+    /// Set the registration paths for the CRG Scoreboard WebSocket.
+    ///
+    /// An example of a registration path would be "ScoreBoard.Game(*)".
+    ///
+    /// # Example
+    /// ```rust
+    /// let builder = WsProxy::builder()
+    ///     .with_registration_paths(vec![
+    ///         "ScoreBoard.Game(*)".to_string(),
+    ///         "ScoreBoard.CurrentGame".to_string()
+    ///     ]);
+    /// ```
     pub fn with_registration_paths(mut self, registration_paths: Vec<String>) -> Self {
         if registration_paths.len() > 0 {
             self.registration_paths = Some(registration_paths);
@@ -267,12 +358,14 @@ impl WsProxyBuilder {
         self
     }
 
+    /// Set a folder for the proxy server to host as static files.
     #[cfg(feature = "static-files")]
     pub fn with_static(mut self, dir: String) -> Self {
         self.static_dir = Some(dir);
         self
     }
 
+    /// Set all the args in one command using crate::Args.
     pub fn with_config(mut self, config: Args) -> Self {
         self.crg_port = Some(config.crg_port);
         self.crg_host = Some(config.crg_host);
@@ -286,11 +379,71 @@ impl WsProxyBuilder {
         self
     }
 
+    /// Set an axum::routing::MethodRouter at a path.
+    ///
+    /// Routes are applied the order in which they are set, after `/WS/`. Routes can also access the
+    /// Axum shared state.
+    ///
+    /// # Examples
+    /// ## Basic Example
+    /// ```rust
+    /// use apex_jump::WsProxy;
+    /// use axum::response::IntoResponse;
+    ///
+    /// fn hello_world() -> impl IntoResponse {
+    ///     "Hello World!"
+    /// }
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let builder = WsProxy::builder()
+    ///         .with_route("/map", get(hello_world));
+    /// }
+    /// ```
+    ///
+    /// ## Using shared WsProxyState
+    /// ```rust
+    /// use apex_jump::WsProxy;
+    /// use axum::response::IntoResponse;
+    ///
+    /// async fn ext_map(State(state): State<Arc<WsProxyState>>) -> impl IntoResponse {
+    ///     serde_json::to_string(&Value::Object(state.ext.lock().await.clone())).unwrap()
+    /// }
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let builder = WsProxy::builder()
+    ///         .with_route("/map", get(ext_map));
+    /// }
+    /// ```
+    #[allow(unused)]
     pub fn with_route(mut self, path: &str, route: MethodRouter<Arc<WsProxyState>>) -> Self {
         self.routes.insert(path.to_string(), route);
         self
     }
 
+    /// Set an axum::routing::Router at a path.
+    ///
+    /// Services are applied the order in which they are set, after `/WS/` and **all** routes.
+    ///
+    /// # Example
+    /// ```rust
+    /// use apex_jump::WsProxy;
+    /// use axum::response::IntoResponse;
+    /// use axum::routing::Router;
+    ///
+    /// fn hello_world() -> impl IntoResponse {
+    ///     "Hello World!"
+    /// }
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let router = Router::new().route("/hello", get(hello_world));
+    ///     let builder = WsProxy::builder()
+    ///         .with_service("/svc", router);
+    /// }
+    /// ```
+    #[allow(unused)]
     pub fn with_service(mut self, path: &str, service: Router<Arc<WsProxyState>>) -> Self {
         self.services.insert(path.to_string(), service);
         self

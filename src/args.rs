@@ -1,7 +1,7 @@
 use clap::Parser;
 use serde::{Deserialize, Serialize};
 
-/// Runs a WebSocket server that proxies the WebSocket data from the CRG Scoreboard to additional clients.
+/// Args to run a WebSocket server that proxies the WebSocket data from the CRG Scoreboard to additional clients.
 #[derive(Parser, Debug, Serialize, Deserialize)]
 #[command(version, about, long_about = None)]
 pub struct Args {

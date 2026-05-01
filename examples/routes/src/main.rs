@@ -6,6 +6,10 @@ use axum::routing::get;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+async fn hello_world() -> impl IntoResponse {
+    "Hello World!"
+}
+
 // The routes can access the state on the webserver, allowing you full access to the `ext` map and
 // `socket_state` serde_json::Value (which is a map) to do with what you please. It is strongly
 // advised _not_ to write over the value in `socket_state`, but it can certainly be helpful to read
@@ -60,6 +64,7 @@ async fn main() -> std::io::Result<()> {
         // Add your service
         .with_service("/svc", service)
         // Add any explicit routes you need
+        .with_route("/hello-world", get(hello_world))
         .with_route("/ext-map", get(ext_map))
         .with_route("/set/{key}/{value}", get(set_key))
         // Build and start the webserver
